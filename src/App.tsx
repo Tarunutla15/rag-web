@@ -13,6 +13,7 @@ import {
   fetchSessions,
   fetchSessionMessages,
   replaceDocument,
+  sendAgentChatStream,
   sendChatStream,
   setSessionDocuments,
   uploadBatch,
@@ -43,6 +44,22 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Friendly label shown while an agent graph node is running. */
+function agentNodeLabel(node: string, toolsUsed: string[]): string {
+  switch (node) {
+    case 'router_node':
+      return 'Understanding your request…'
+    case 'rag_node':
+      return toolsUsed.length ? `Reasoning (used: ${toolsUsed.join(', ')})…` : 'Reasoning over your documents…'
+    case 'tools':
+      return 'Searching documents & running tools…'
+    case 'general_support_node':
+      return 'Composing a reply…'
+    default:
+      return 'Working…'
+  }
 }
 
 function NavIcon({ mode }: { mode: Mode }) {
@@ -84,6 +101,18 @@ export default function App() {
   const [messagesLoading, setMessagesLoading] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [chatSending, setChatSending] = useState(false)
+  const [agentMode, setAgentMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('agentMode') === '1'
+    } catch {
+      return false
+    }
+  })
+  const [agentActivity, setAgentActivity] = useState<string>('')
+  // Consent offer kept OUT of the message list: the post-send message reload replaces `messages`
+  // from the DB (which has no runtime flags), so this survives that reload. Tagged with its
+  // session so it's only shown in the conversation it belongs to (no cross-session leakage).
+  const [gkOffer, setGkOffer] = useState<{ sourceQuery: string; sessionId: string } | null>(null)
   const [pageBusy, setPageBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [files, setFiles] = useState<File[]>([])
@@ -181,6 +210,14 @@ export default function App() {
   }, [refreshSessions, refreshLibrary])
 
   useEffect(() => {
+    try {
+      localStorage.setItem('agentMode', agentMode ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }, [agentMode])
+
+  useEffect(() => {
     if (!activeSessionId) {
       setMessages([])
       setMessagesLoading(false)
@@ -275,12 +312,13 @@ export default function App() {
     }
   }
 
-  async function onSend() {
-    const q = prompt.trim()
+  async function onSend(opts?: { queryText?: string; allowUngrounded?: boolean; skipUserBubble?: boolean }) {
+    const q = (opts?.queryText ?? prompt).trim()
     if (!q || chatSending) return
 
-    setPrompt('')
+    if (!opts?.skipUserBubble) setPrompt('')
     setError(null)
+    setGkOffer(null)
 
     const userMsg: ChatMessage = {
       id: Date.now(),
@@ -297,75 +335,95 @@ export default function App() {
       content: '',
       created_at: new Date().toISOString(),
     }
-    setMessages((m) => [...m, userMsg, assistantPlaceholder])
+    setMessages((m) =>
+      opts?.skipUserBubble ? [...m, assistantPlaceholder] : [...m, userMsg, assistantPlaceholder],
+    )
     setChatSending(true)
 
-    try {
-      const res = await sendChatStream(
-        {
-          query: q,
-          session_id: activeSessionId ?? undefined,
-          ...(selectedFileIds.length > 0 ? { file_ids: selectedFileIds } : {}),
-        },
-        {
-          onMeta: (meta) => {
-            const sid = meta.session_id
-            if (!sid) return
-            setMessages((m) =>
-              m.map((x) => {
-                if (x.id === userMsg.id) return { ...x, session_id: sid }
-                if (x.id === assistantId) {
-                  return {
-                    ...x,
-                    session_id: sid,
-                    figures: meta.figures ?? x.figures ?? null,
-                  }
-                }
-                return x
-              }),
-            )
-            setActiveSessionId((prev) => prev ?? sid)
-          },
-          onDone: (data) => {
-            setMessages((m) =>
-              m.map((x) =>
-                x.id === assistantId
-                  ? {
-                      ...x,
-                      content: data.answer,
-                      session_id: data.session_id,
-                      figures: data.figures ?? x.figures ?? null,
-                    }
-                  : x,
-              ),
-            )
-          },
-          onToken: (token) => {
-            setMessages((m) => {
-              const hasPlaceholder = m.some((x) => x.id === assistantId)
-              if (hasPlaceholder) {
-                return m.map((x) =>
-                  x.id === assistantId ? { ...x, content: x.content + token } : x,
-                )
+    const payload = {
+      query: q,
+      session_id: activeSessionId ?? undefined,
+      ...(selectedFileIds.length > 0 ? { file_ids: selectedFileIds } : {}),
+      ...(opts?.allowUngrounded ? { allow_ungrounded: true } : {}),
+    }
+
+    // Patch the assistant placeholder with the final answer (shared by both modes).
+    const applyDone = (data: {
+      answer: string
+      session_id: string
+      figures?: ChatMessage['figures']
+      offer_general_knowledge?: boolean
+    }) => {
+      setMessages((m) =>
+        m.map((x) =>
+          x.id === assistantId
+            ? {
+                ...x,
+                content: data.answer,
+                session_id: data.session_id,
+                figures: data.figures ?? x.figures ?? null,
               }
-              const lastAssistant = [...m].reverse().find((x) => x.role === 'assistant')
-              if (!lastAssistant) return m
-              return m.map((x) =>
-                x.id === lastAssistant.id ? { ...x, content: x.content + token } : x,
-              )
-            })
-          },
-          onError: (detail) => {
-            setMessages((m) =>
-              m.map((x) =>
-                x.id === assistantId
-                  ? { ...x, content: `**Error:** ${detail}` }
-                  : x,
-              ),
-            )
-          },
-        },
+            : x,
+        ),
       )
+      // Offer the general-knowledge fallback when the agent refused an ungrounded doc question.
+      setGkOffer(
+        data.offer_general_knowledge ? { sourceQuery: q, sessionId: data.session_id } : null,
+      )
+    }
+    const applyError = (detail: string) => {
+      setMessages((m) =>
+        m.map((x) => (x.id === assistantId ? { ...x, content: `**Error:** ${detail}` } : x)),
+      )
+    }
+
+    try {
+      const res = agentMode
+        ? await sendAgentChatStream(payload, {
+            onNode: (node, tools) => setAgentActivity(agentNodeLabel(node, tools)),
+            onDone: (data) => {
+              setActiveSessionId((prev) => prev ?? data.session_id)
+              applyDone(data)
+            },
+            onError: applyError,
+          })
+        : await sendChatStream(payload, {
+            onMeta: (meta) => {
+              const sid = meta.session_id
+              if (!sid) return
+              setMessages((m) =>
+                m.map((x) => {
+                  if (x.id === userMsg.id) return { ...x, session_id: sid }
+                  if (x.id === assistantId) {
+                    return {
+                      ...x,
+                      session_id: sid,
+                      figures: meta.figures ?? x.figures ?? null,
+                    }
+                  }
+                  return x
+                }),
+              )
+              setActiveSessionId((prev) => prev ?? sid)
+            },
+            onDone: applyDone,
+            onToken: (token) => {
+              setMessages((m) => {
+                const hasPlaceholder = m.some((x) => x.id === assistantId)
+                if (hasPlaceholder) {
+                  return m.map((x) =>
+                    x.id === assistantId ? { ...x, content: x.content + token } : x,
+                  )
+                }
+                const lastAssistant = [...m].reverse().find((x) => x.role === 'assistant')
+                if (!lastAssistant) return m
+                return m.map((x) =>
+                  x.id === lastAssistant.id ? { ...x, content: x.content + token } : x,
+                )
+              })
+            },
+            onError: applyError,
+          })
       const resolvedSessionId = res.session_id ?? activeSessionId ?? null
       if (resolvedSessionId && selectedFileIds.length > 0) {
         await setSessionDocuments(resolvedSessionId, { file_ids: selectedFileIds })
@@ -419,7 +477,21 @@ export default function App() {
       })
     } finally {
       setChatSending(false)
+      setAgentActivity('')
     }
+  }
+
+  // User accepted the "answer from general knowledge?" prompt: hide the card and re-run the
+  // original question with allow_ungrounded so the agent answers from training knowledge.
+  async function onAcceptGeneralKnowledge() {
+    const q = (gkOffer?.sourceQuery ?? '').trim()
+    setGkOffer(null)
+    if (!q || chatSending) return
+    await onSend({ queryText: q, allowUngrounded: true, skipUserBubble: true })
+  }
+
+  function onDismissGeneralKnowledge() {
+    setGkOffer(null)
   }
 
   async function onUpload() {
@@ -712,9 +784,31 @@ export default function App() {
               <p className="workspaceSubtitle muted">{scopeLabel}</p>
             )}
           </div>
-          <span className="apiPill" title="API endpoint">
-            {API_BASE_URL ? API_BASE_URL.replace(/^https?:\/\//, '') : 'localhost:8000'}
-          </span>
+          <div className="headerRight">
+            {mode === 'chat' && (
+              <div className="modeSwitch" role="group" aria-label="Answer mode">
+                <button
+                  type="button"
+                  className={`modeSwitchBtn${!agentMode ? ' modeSwitchBtnOn' : ''}`}
+                  onClick={() => setAgentMode(false)}
+                  title="Classic RAG: retrieve and answer in one step"
+                >
+                  RAG
+                </button>
+                <button
+                  type="button"
+                  className={`modeSwitchBtn${agentMode ? ' modeSwitchBtnOn' : ''}`}
+                  onClick={() => setAgentMode(true)}
+                  title="Agent: plans, calls tools (search + calculator), and reasons in multiple steps"
+                >
+                  Agent
+                </button>
+              </div>
+            )}
+            <span className="apiPill" title="API endpoint">
+              {API_BASE_URL ? API_BASE_URL.replace(/^https?:\/\//, '') : 'localhost:8000'}
+            </span>
+          </div>
         </header>
 
         {error && (
@@ -922,7 +1016,7 @@ export default function App() {
                             ) : chatSending ? (
                               <>
                                 <span className="spinner" aria-hidden />
-                                <span>Thinking…</span>
+                                <span>{agentActivity || 'Thinking…'}</span>
                               </>
                             ) : null
                           ) : (
@@ -937,6 +1031,25 @@ export default function App() {
                       <span className="spinner" />
                     </div>
                   )}
+                  {gkOffer && agentMode && !chatSending && gkOffer.sessionId === activeSessionId ? (
+                    <div className="gkConsent" role="group" aria-label="General knowledge fallback">
+                      <span className="gkConsentText">
+                        Not found in your documents. Answer from general AI knowledge instead?
+                      </span>
+                      <div className="gkConsentActions">
+                        <button
+                          type="button"
+                          className="btnSm btnPrimary"
+                          onClick={() => void onAcceptGeneralKnowledge()}
+                        >
+                          Yes, use general knowledge
+                        </button>
+                        <button type="button" className="btnSm" onClick={() => onDismissGeneralKnowledge()}>
+                          No thanks
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   <div ref={messagesEndRef} />
                 </div>
 
@@ -1009,7 +1122,7 @@ export default function App() {
                     <textarea
                       rows={1}
                       value={prompt}
-                      placeholder="Ask about your documents…"
+                      placeholder={agentMode ? 'Ask the agent — it can search and calculate…' : 'Ask about your documents…'}
                       disabled={chatSending}
                       onChange={(e) => setPrompt(e.target.value)}
                       onKeyDown={(e) => {

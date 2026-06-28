@@ -26,6 +26,9 @@ export type ChatRequest = {
   session_id?: string
   file_id?: string
   file_ids?: string[]
+  // Opt-in (set after the user accepts the consent prompt): allow a general-knowledge answer
+  // when the documents contain nothing.
+  allow_ungrounded?: boolean
 }
 
 export type ChatFigure = {
@@ -43,6 +46,10 @@ export type ChatResponse = {
   detected_technology?: string | null
   detected_domain?: string | null
   figures?: ChatFigure[] | null
+  // Agent only: whether the answer is document-grounded, and whether the client should offer the
+  // "answer from general knowledge?" consent prompt.
+  grounded?: boolean
+  offer_general_knowledge?: boolean
 }
 
 export type BatchUploadResponse = {
@@ -78,6 +85,7 @@ export type DocumentInfo = {
 }
 
 export type UsageSummary = {
+  requests?: number
   chat_completions: number
   prompt_tokens: number
   completion_tokens: number
@@ -98,9 +106,43 @@ export type UsageEventItem = {
   created_at: string
 }
 
+export type ComponentTotal = {
+  component: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost_usd?: number | null
+  count: number
+}
+
+export type UsageComponent = {
+  component: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost_usd?: number | null
+  model?: string | null
+  provider?: string | null
+  count: number
+}
+
+export type UsageRequestGroup = {
+  request_id?: string | null
+  session_id?: string | null
+  query_preview: string
+  created_at: string
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cost_usd?: number | null
+  components: UsageComponent[]
+}
+
 export type DashboardUsageResponse = {
   days: number
   summary: UsageSummary
-  recent: UsageEventItem[]
+  component_totals: ComponentTotal[]
+  requests: UsageRequestGroup[]
+  recent?: UsageEventItem[]
 }
 

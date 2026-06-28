@@ -8,6 +8,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/chat': 'http://127.0.0.1:8000',
+      '/agent': 'http://127.0.0.1:8000',
       '/upload': 'http://127.0.0.1:8000',
       '/sessions': 'http://127.0.0.1:8000',
       '/documents': 'http://127.0.0.1:8000',

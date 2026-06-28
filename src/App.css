@@ -236,6 +236,44 @@
   white-space: nowrap;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* RAG / Agent segmented toggle */
+.modeSwitch {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.modeSwitchBtn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  padding: 5px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.modeSwitchBtn:hover {
+  color: inherit;
+}
+
+.modeSwitchBtnOn {
+  background: var(--accent-soft);
+  color: #e9e5ff;
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
 .bannerError {
   display: flex;
   align-items: center;
@@ -1256,11 +1294,153 @@ button:disabled,
   white-space: nowrap;
 }
 
+/* ---- per-component usage breakdown ---- */
+:root {
+  --comp-answer: #6aa9ff;
+  --comp-rerank: #b07bff;
+  --comp-classify: #34d399;
+  --comp-router: #fbbf24;
+  --comp-ocr: #fb7185;
+  --comp-embed: #22d3ee;
+}
+
+.compChip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+.compChip.comp-answer { color: var(--comp-answer); border-color: color-mix(in srgb, var(--comp-answer) 45%, transparent); }
+.compChip.comp-rerank { color: var(--comp-rerank); border-color: color-mix(in srgb, var(--comp-rerank) 45%, transparent); }
+.compChip.comp-classify { color: var(--comp-classify); border-color: color-mix(in srgb, var(--comp-classify) 45%, transparent); }
+.compChip.comp-router { color: var(--comp-router); border-color: color-mix(in srgb, var(--comp-router) 45%, transparent); }
+.compChip.comp-ocr { color: var(--comp-ocr); border-color: color-mix(in srgb, var(--comp-ocr) 45%, transparent); }
+.compChip.comp-embed { color: var(--comp-embed); border-color: color-mix(in srgb, var(--comp-embed) 45%, transparent); }
+
+.compTotals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.compTotalCard {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+.compTotalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.compTotalValue {
+  font-size: 1.15rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+.compBar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin: 8px 0 6px;
+}
+.compBarFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+.compBarFill.comp-answer { background: var(--comp-answer); }
+.compBarFill.comp-rerank { background: var(--comp-rerank); }
+.compBarFill.comp-classify { background: var(--comp-classify); }
+.compBarFill.comp-router { background: var(--comp-router); }
+.compBarFill.comp-ocr { background: var(--comp-ocr); }
+.compBarFill.comp-embed { background: var(--comp-embed); }
+
+/* dots that preview which components a request used */
+.compDots { display: flex; gap: 4px; flex-wrap: wrap; }
+.compDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  opacity: 0.9;
+}
+.compDot.comp-answer { background: var(--comp-answer); }
+.compDot.comp-rerank { background: var(--comp-rerank); }
+.compDot.comp-classify { background: var(--comp-classify); }
+.compDot.comp-router { background: var(--comp-router); }
+.compDot.comp-ocr { background: var(--comp-ocr); }
+.compDot.comp-embed { background: var(--comp-embed); }
+
+/* expandable request rows */
+.usageReqRow { cursor: pointer; }
+.usageExpandCell { width: 28px; }
+.usageExpandBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  line-height: 1;
+}
+.usageDetailRow td { background: rgba(0, 0, 0, 0.18); padding: 0 12px 12px; }
+.usageSubTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.usageSubTable th,
+.usageSubTable td {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.usageSubTable th {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
 .dashboardLoading,
 .dashboardEmpty {
   padding: 32px;
   text-align: center;
   color: var(--text-muted);
+}
+
+/* ----- General-knowledge consent card ----- */
+
+.gkConsent {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gkConsentText {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.gkConsentActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 /* ----- Responsive ----- */
